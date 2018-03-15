@@ -27,7 +27,6 @@
 
 #define NFSDDBG_FACILITY	NFSDDBG_SVC
 
-extern struct svc_program	nfsd_program;
 static int			nfsd(void *vrqstp);
 struct timeval			nfssvc_boot;
 
@@ -54,7 +53,6 @@ struct timeval			nfssvc_boot;
  *	nfsd_versions
  */
 DEFINE_MUTEX(nfsd_mutex);
-struct svc_serv 		*nfsd_serv;
 
 /*
  * nfsd_drc_lock protects nfsd_drc_max_pages and nfsd_drc_pages_used.
@@ -115,8 +113,20 @@ struct svc_program		nfsd_program = {
 	.pg_vers		= nfsd_versions,	/* version table */
 	.pg_name		= "nfsd",		/* program name */
 	.pg_class		= "nfsd",		/* authentication class */
-	.pg_stats		= &nfsd_svcstats,	/* version table */
 	.pg_authenticate	= &svc_set_client,	/* export authentication */
+
+};
+
+struct svc_program		ve_nfsd_program = {
+#if defined(CONFIG_NFSD_V2_ACL) || defined(CONFIG_NFSD_V3_ACL)
+	.pg_next		= &nfsd_acl_program,
+#endif
+	.pg_prog		= NFS_PROGRAM,
+	.pg_nvers		= NFSD_NRVERS - 1,	/* no nfsdv4 for ct */
+	.pg_vers		= nfsd_versions,
+	.pg_name		= "nfsd",
+	.pg_class		= "nfsd",
+	.pg_authenticate	= &svc_set_client,
 
 };
 
@@ -125,6 +135,8 @@ u32 nfsd_supported_minorversion;
 int nfsd_vers(int vers, enum vers_op change)
 {
 	if (vers < NFSD_MINVERS || vers >= NFSD_NRVERS)
+		return 0;
+	if ((vers == 4) && !ve_is_super(get_exec_env()))
 		return 0;
 	switch(change) {
 	case NFSD_SET:
@@ -144,7 +156,8 @@ int nfsd_vers(int vers, enum vers_op change)
 	case NFSD_TEST:
 		return nfsd_versions[vers] != NULL;
 	case NFSD_AVAIL:
-		return nfsd_version[vers] != NULL;
+		if ((vers != 4) || ve_is_super(get_exec_env()))
+			return (nfsd_version[vers] != NULL);
 	}
 	return 0;
 }
@@ -204,7 +217,10 @@ static int nfsd_init_socks(int port)
 	return 0;
 }
 
-static bool nfsd_up = false;
+#ifndef CONFIG_VE
+static bool _nfsd_up = false;
+static DECLARE_COMPLETION(_nfsd_exited);
+#endif
 
 static int nfsd_startup(unsigned short port, int nrservs)
 {
@@ -226,9 +242,11 @@ static int nfsd_startup(unsigned short port, int nrservs)
 	ret = lockd_up();
 	if (ret)
 		goto out_racache;
-	ret = nfs4_state_start();
-	if (ret)
-		goto out_lockd;
+	if (ve_is_super(get_exec_env())) {
+		ret = nfs4_state_start();
+		if (ret)
+			goto out_lockd;
+	}
 	nfsd_up = true;
 	return 0;
 out_lockd:
@@ -248,10 +266,10 @@ static void nfsd_shutdown(void)
 	 */
 	if (!nfsd_up)
 		return;
-	nfs4_state_shutdown();
+	if (ve_is_super(get_exec_env()))
+		nfs4_state_shutdown();
 	lockd_down();
 	nfsd_racache_shutdown();
-	nfsd_up = false;
 }
 
 static int nfsd_inetaddr_event(struct notifier_block *this, unsigned long event,
@@ -260,13 +278,19 @@ static int nfsd_inetaddr_event(struct notifier_block *this, unsigned long event,
 	struct in_ifaddr *ifa = (struct in_ifaddr *)ptr;
 	struct sockaddr_in sin;
 
-	if (event != NETDEV_DOWN)
+	if ((event != NETDEV_DOWN) ||
+	    !NFSD_CTX_TEST ||
+	    !atomic_inc_not_zero(&nfsd_ntf_refcnt))
 		goto out;
 
-	dprintk("nfsd_inetaddr_event: removed %pI4\n", &ifa->ifa_local);
-	sin.sin_family = AF_INET;
-	sin.sin_addr.s_addr = ifa->ifa_local;
-	svc_age_temp_xprts_now(nfsd_serv, (struct sockaddr *)&sin);
+	if (nfsd_serv) {
+		dprintk("nfsd_inetaddr_event: removed %pI4\n", &ifa->ifa_local);
+		sin.sin_family = AF_INET;
+		sin.sin_addr.s_addr = ifa->ifa_local;
+		svc_age_temp_xprts_now(nfsd_serv, (struct sockaddr *)&sin);
+	}
+	atomic_dec(&nfsd_ntf_refcnt);
+	wake_up(&nfsd_ntf_wq);
 out:
 	return NOTIFY_DONE;
 }
@@ -282,13 +306,19 @@ static int nfsd_inet6addr_event(struct notifier_block *this, unsigned long event
 	struct inet6_ifaddr *ifa = (struct inet6_ifaddr *)ptr;
 	struct sockaddr_in6 sin6;
 
-	if (event != NETDEV_DOWN)
+	if ((event != NETDEV_DOWN) ||
+	    !NFSD_CTX_TEST ||
+	    !atomic_inc_not_zero(&nfsd_ntf_refcnt))
 		goto out;
 
-	dprintk("nfsd_inet6addr_event: removed %pI6\n", &ifa->addr);
-	sin6.sin6_family = AF_INET6;
-	sin6.sin6_addr = ifa->addr;
-	svc_age_temp_xprts_now(nfsd_serv, (struct sockaddr *)&sin6);
+	if (nfsd_serv) {
+		dprintk("nfsd_inet6addr_event: removed %pI6\n", &ifa->addr);
+		sin6.sin6_family = AF_INET6;
+		sin6.sin6_addr = ifa->addr;
+		svc_age_temp_xprts_now(nfsd_serv, (struct sockaddr *)&sin6);
+	}
+	atomic_dec(&nfsd_ntf_refcnt);
+	wake_up(&nfsd_ntf_wq);
 out:
 	return NOTIFY_DONE;
 }
@@ -298,28 +328,35 @@ static struct notifier_block nfsd_inet6addr_notifier = {
 };
 #endif
 
+static atomic_t nfsd_notifier_refcount = ATOMIC_INIT(0);
+
 static void nfsd_last_thread(struct svc_serv *serv)
 {
+	atomic_dec(&nfsd_ntf_refcnt);
+	/* check if the notifier still has clients */
+	if (atomic_dec_return(&nfsd_notifier_refcount) == 0) {
 #if IS_ENABLED(CONFIG_IPV6)
-	int (*fn)(struct notifier_block *);
+		int (*fn)(struct notifier_block *);
 
-	fn = symbol_get(unregister_inet6addr_notifier);
-	if (fn) {
-		fn(&nfsd_inet6addr_notifier);
-		symbol_put_addr(fn);
-	}
+		fn = symbol_get(unregister_inet6addr_notifier);
+		if (fn) {
+			fn(&nfsd_inet6addr_notifier);
+			symbol_put_addr(fn);
+		}
 #endif
-	unregister_inetaddr_notifier(&nfsd_inetaddr_notifier);
-
+		unregister_inetaddr_notifier(&nfsd_inetaddr_notifier);
+	}
+	wait_event(nfsd_ntf_wq, atomic_read(&nfsd_ntf_refcnt) == 0);
 	/* When last nfsd thread exits we need to do some clean-up */
 	nfsd_serv = NULL;
 	nfsd_shutdown();
 
 	svc_rpcb_cleanup(serv);
 
-	printk(KERN_WARNING "nfsd: last server has exited, flushing export "
-			    "cache\n");
 	nfsd_export_flush();
+
+	nfsd_up = false;
+	complete(&nfsd_exited);
 }
 
 void nfsd_reset_versions(void)
@@ -368,9 +405,6 @@ static void set_max_drc(void)
 int nfsd_create_serv(void)
 {
 	int err = 0;
-#if IS_ENABLED(CONFIG_IPV6)
-	int (*fn)(struct notifier_block *);
-#endif
 
 	WARN_ON(!mutex_is_locked(&nfsd_mutex));
 	if (nfsd_serv) {
@@ -395,21 +429,31 @@ int nfsd_create_serv(void)
 	}
 	nfsd_reset_versions();
 
-	nfsd_serv = svc_create_pooled(&nfsd_program, nfsd_max_blksize,
-				      nfsd_last_thread, nfsd, THIS_MODULE);
+	nfsd_serv = svc_create_pooled(ve_is_super(get_exec_env()) ?
+					&nfsd_program : &ve_nfsd_program,
+				      nfsd_max_blksize,
+				      nfsd_last_thread, nfsd, THIS_MODULE,
+				      get_exec_env()->nfsd_data->svc_stat);
 	if (nfsd_serv == NULL)
 		return -ENOMEM;
 
 	set_max_drc();
-	register_inetaddr_notifier(&nfsd_inetaddr_notifier);
+	/* check if the notifier is already set */
+	if (atomic_inc_return(&nfsd_notifier_refcount) == 1) {
 #if IS_ENABLED(CONFIG_IPV6)
-	fn = symbol_get(register_inet6addr_notifier);
-	if (fn) {
-		fn(&nfsd_inet6addr_notifier);
-		symbol_put_addr(fn);
-	}
+		int (*fn)(struct notifier_block *);
+
+		fn = symbol_get(register_inet6addr_notifier);
+		if (fn) {
+			fn(&nfsd_inet6addr_notifier);
+			symbol_put_addr(fn);
+		}
 #endif
+		register_inetaddr_notifier(&nfsd_inetaddr_notifier);
+	}
+	atomic_inc(&nfsd_ntf_refcnt);
 	do_gettimeofday(&nfssvc_boot);		/* record boot time */
+	init_completion(&nfsd_exited);
 	return err;
 }
 
@@ -526,8 +570,11 @@ nfsd_svc(unsigned short port, int nrservs)
 	 */
 	error = nfsd_serv->sv_nrthreads - 1;
 out_shutdown:
-	if (error < 0 && !nfsd_up_before)
+	if (error < 0 && !nfsd_up_before) {
 		nfsd_shutdown();
+		nfsd_up = false;
+		complete(&nfsd_exited);
+	}
 out_destroy:
 	svc_destroy(nfsd_serv);		/* Release server */
 out:
@@ -637,6 +684,37 @@ static __be32 map_new_errors(u32 vers, __be32 nfserr)
 	return nfserr;
 }
 
+/*
+ * A write procedure can have a large argument, and a read procedure can
+ * have a large reply, but no NFSv2 or NFSv3 procedure has argument and
+ * reply that can both be larger than a page.  The xdr code has taken
+ * advantage of this assumption to be a sloppy about bounds checking in
+ * some cases.  Pending a rewrite of the NFSv2/v3 xdr code to fix that
+ * problem, we enforce these assumptions here:
+ */
+static bool nfs_request_too_big(struct svc_rqst *rqstp,
+				struct svc_procedure *proc)
+{
+	/*
+	 * The ACL code has more careful bounds-checking and is not
+	 * susceptible to this problem:
+	 */
+	if (rqstp->rq_prog != NFS_PROGRAM)
+		return false;
+	/*
+	 * Ditto NFSv4 (which can in theory have argument and reply both
+	 * more than a page):
+	 */
+	if (rqstp->rq_vers >= 4)
+		return false;
+	/* The reply will be small, we're OK: */
+	if (proc->pc_xdrressize > 0 &&
+	    proc->pc_xdrressize < XDR_QUADLEN(PAGE_SIZE))
+		return false;
+
+	return rqstp->rq_arg.len > PAGE_SIZE;
+}
+
 int
 nfsd_dispatch(struct svc_rqst *rqstp, __be32 *statp)
 {
@@ -649,6 +727,11 @@ nfsd_dispatch(struct svc_rqst *rqstp, __be32 *statp)
 				rqstp->rq_vers, rqstp->rq_proc);
 	proc = rqstp->rq_procinfo;
 
+	if (nfs_request_too_big(rqstp, proc)) {
+		dprintk("nfsd: NFSv%d argument too large\n", rqstp->rq_vers);
+		*statp = rpc_garbage_args;
+		return 1;
+	}
 	/*
 	 * Give the xdr decoder a chance to change this if it wants
 	 * (necessary in the NFSv4.0 compound case)
