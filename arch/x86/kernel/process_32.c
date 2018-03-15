@@ -38,6 +38,7 @@
 #include <linux/uaccess.h>
 #include <linux/io.h>
 #include <linux/kdebug.h>
+#include <linux/sysctl.h>
 
 #include <asm/pgtable.h>
 #include <asm/system.h>
@@ -57,6 +58,9 @@
 #include <asm/syscalls.h>
 
 asmlinkage void ret_from_fork(void) __asm__("ret_from_fork");
+EXPORT_SYMBOL(ret_from_fork);
+asmlinkage void i386_ret_from_resume(void) __asm__("i386_ret_from_resume");
+EXPORT_SYMBOL_GPL(i386_ret_from_resume);
 
 /*
  * Return saved PC of a blocked thread.
@@ -140,7 +144,8 @@ void __show_regs(struct pt_regs *regs, int all)
 	printk(KERN_DEFAULT "EIP: %04x:[<%08lx>] EFLAGS: %08lx CPU: %d\n",
 			(u16)regs->cs, regs->ip, regs->flags,
 			smp_processor_id());
-	print_symbol("EIP is at %s\n", regs->ip);
+	if (decode_call_traces)
+		print_symbol("EIP is at %s\n", regs->ip);
 
 	printk(KERN_DEFAULT "EAX: %08lx EBX: %08lx ECX: %08lx EDX: %08lx\n",
 		regs->ax, regs->bx, regs->cx, regs->dx);
@@ -176,6 +181,8 @@ void show_regs(struct pt_regs *regs)
 {
 	show_registers(regs);
 	show_trace(NULL, regs, &regs->sp);
+	if (!decode_call_traces)
+		printk(" EIP: [<%08lx>]\n", regs->ip);
 }
 
 /*
@@ -184,6 +191,7 @@ void show_regs(struct pt_regs *regs)
  * the "args".
  */
 extern void kernel_thread_helper(void);
+EXPORT_SYMBOL_GPL(kernel_thread_helper);
 
 /*
  * Create a kernel thread
@@ -191,6 +199,13 @@ extern void kernel_thread_helper(void);
 int kernel_thread(int (*fn)(void *), void *arg, unsigned long flags)
 {
 	struct pt_regs regs;
+
+	/* Don't allow kernel_thread() inside VE */
+	if (!ve_allow_kthreads && !ve_is_super(get_exec_env())) {
+		printk("kernel_thread call inside container\n");
+		dump_stack();
+		return -EPERM;
+	}
 
 	memset(&regs, 0, sizeof(regs));
 

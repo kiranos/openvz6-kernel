@@ -654,6 +654,9 @@ ip_set_create(struct sock *ctnl, struct sk_buff *skb,
 	u32 flags = flag_exist(nlh);
 	int ret = 0;
 
+	if (!ve_is_super(get_exec_env()))
+		return -EPERM;
+
 	if (unlikely(protocol_failed(attr) ||
 		     attr[IPSET_ATTR_SETNAME] == NULL ||
 		     attr[IPSET_ATTR_TYPENAME] == NULL ||
@@ -774,6 +777,9 @@ ip_set_destroy(struct sock *ctnl, struct sk_buff *skb,
 	ip_set_id_t i;
 	int ret = 0;
 
+	if (!ve_is_super(get_exec_env()))
+		return -EPERM;
+
 	if (unlikely(protocol_failed(attr)))
 		return -IPSET_ERR_PROTOCOL;
 
@@ -838,6 +844,9 @@ ip_set_flush(struct sock *ctnl, struct sk_buff *skb,
 {
 	ip_set_id_t i;
 
+	if (!ve_is_super(get_exec_env()))
+		return -EPERM;
+
 	if (unlikely(protocol_failed(attr)))
 		return -IPSET_ERR_PROTOCOL;
 
@@ -876,6 +885,9 @@ ip_set_rename(struct sock *ctnl, struct sk_buff *skb,
 	const char *name2;
 	ip_set_id_t i;
 	int ret = 0;
+
+	if (!ve_is_super(get_exec_env()))
+		return -EPERM;
 
 	if (unlikely(protocol_failed(attr) ||
 		     attr[IPSET_ATTR_SETNAME] == NULL ||
@@ -924,6 +936,9 @@ ip_set_swap(struct sock *ctnl, struct sk_buff *skb,
 	struct ip_set *from, *to;
 	ip_set_id_t from_id, to_id;
 	char from_name[IPSET_MAXNAMELEN];
+
+	if (!ve_is_super(get_exec_env()))
+		return -EPERM;
 
 	if (unlikely(protocol_failed(attr) ||
 		     attr[IPSET_ATTR_SETNAME] == NULL ||
@@ -1139,6 +1154,9 @@ ip_set_dump(struct sock *ctnl, struct sk_buff *skb,
 	    const struct nlmsghdr *nlh,
 	    const struct nlattr * const attr[])
 {
+	if (!ve_is_super(get_exec_env()))
+		return -EPERM;
+
 	if (unlikely(protocol_failed(attr)))
 		return -IPSET_ERR_PROTOCOL;
 
@@ -1230,6 +1248,9 @@ ip_set_uadd(struct sock *ctnl, struct sk_buff *skb,
 	bool use_lineno;
 	int ret = 0;
 
+	if (!ve_is_super(get_exec_env()))
+		return -EPERM;
+
 	if (unlikely(protocol_failed(attr) ||
 		     attr[IPSET_ATTR_SETNAME] == NULL ||
 		     !((attr[IPSET_ATTR_DATA] != NULL) ^
@@ -1284,6 +1305,9 @@ ip_set_udel(struct sock *ctnl, struct sk_buff *skb,
 	bool use_lineno;
 	int ret = 0;
 
+	if (!ve_is_super(get_exec_env()))
+		return -EPERM;
+
 	if (unlikely(protocol_failed(attr) ||
 		     attr[IPSET_ATTR_SETNAME] == NULL ||
 		     !((attr[IPSET_ATTR_DATA] != NULL) ^
@@ -1335,6 +1359,9 @@ ip_set_utest(struct sock *ctnl, struct sk_buff *skb,
 	struct nlattr *tb[IPSET_ATTR_ADT_MAX+1] = {};
 	int ret = 0;
 
+	if (!ve_is_super(get_exec_env()))
+		return -EPERM;
+
 	if (unlikely(protocol_failed(attr) ||
 		     attr[IPSET_ATTR_SETNAME] == NULL ||
 		     attr[IPSET_ATTR_DATA] == NULL ||
@@ -1371,6 +1398,9 @@ ip_set_header(struct sock *ctnl, struct sk_buff *skb,
 	struct nlmsghdr *nlh2;
 	ip_set_id_t index;
 	int ret = 0;
+
+	if (!ve_is_super(get_exec_env()))
+		return -EPERM;
 
 	if (unlikely(protocol_failed(attr) ||
 		     attr[IPSET_ATTR_SETNAME] == NULL))
@@ -1429,6 +1459,9 @@ ip_set_type(struct sock *ctnl, struct sk_buff *skb,
 	const char *typename;
 	int ret = 0;
 
+	if (!ve_is_super(get_exec_env()))
+		return -EPERM;
+
 	if (unlikely(protocol_failed(attr) ||
 		     attr[IPSET_ATTR_TYPENAME] == NULL ||
 		     attr[IPSET_ATTR_FAMILY] == NULL))
@@ -1484,6 +1517,9 @@ ip_set_protocol(struct sock *ctnl, struct sk_buff *skb,
 	struct sk_buff *skb2;
 	struct nlmsghdr *nlh2;
 	int ret = 0;
+
+	if (!ve_is_super(get_exec_env()))
+		return -EPERM;
 
 	if (unlikely(attr[IPSET_ATTR_PROTOCOL] == NULL))
 		return -IPSET_ERR_PROTOCOL;
@@ -1601,6 +1637,8 @@ ip_set_sockfn_get(struct sock *sk, int optval, void __user *user, int *len)
 	int copylen = *len, ret = 0;
 
 	if (!capable(CAP_NET_ADMIN))
+		return -EPERM;
+	if (!ve_is_super(get_exec_env()))
 		return -EPERM;
 	if (optval != SO_IP_SET)
 		return -EBADF;

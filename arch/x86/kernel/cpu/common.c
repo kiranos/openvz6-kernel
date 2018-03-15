@@ -686,6 +686,17 @@ static void __cpuinit get_cpu_cap(struct cpuinfo_x86 *c)
 		rh->x86_capability[9 - NCAPINTS] = ebx;
 	}
 
+	/* Extended state features: level 0x0000000d */
+	if (c->cpuid_level >= 0x0000000d) {
+		u32 eax, ebx, ecx, edx;
+		struct cpuinfo_x86_rh *rh = get_cpuinfo_x86_rh(c);
+
+		cpuid_count(0x0000000d, 1, &eax, &ebx, &ecx, &edx);
+
+		/* write into "word 10" of the rh extended capability area */
+		rh->x86_capability[10 - NCAPINTS] = eax;
+	}
+
 	/* Additional Intel-defined flags: level 0x0000000F */
 	if (c->cpuid_level >= 0x0000000F) {
 		u32 eax, ebx, ecx, edx;

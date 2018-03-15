@@ -988,8 +988,7 @@ extern unsigned long thread_saved_pc(struct task_struct *tsk);
 /* This decides where the kernel will search for a free chunk of vm
  * space during mmap's.
  */
-#define IA32_PAGE_OFFSET	((current->personality & ADDR_LIMIT_3GB) ? \
-					0xc0000000 : 0xFFFFe000)
+#define IA32_PAGE_OFFSET 0xc0000000
 
 #define TASK_SIZE		(test_thread_flag(TIF_IA32) ? \
 					IA32_PAGE_OFFSET : TASK_SIZE_MAX)
@@ -1081,5 +1080,10 @@ static inline uint32_t hypervisor_cpuid_base(const char *sig, uint32_t leaves)
 
 	return 0;
 }
+
+extern void (*set_cpuid_faulting_cb)(bool enable);
+extern void set_cpuid_faulting(bool enable);
+
+extern void get_cpu_cap_masked(u32 *val);
 
 #endif /* _ASM_X86_PROCESSOR_H */

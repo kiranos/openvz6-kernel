@@ -169,6 +169,7 @@ int ip6_output(struct sk_buff *skb)
 	return NF_HOOK(PF_INET6, NF_INET_POST_ROUTING, skb, NULL, dev,
 		       ip6_finish_output);
 }
+EXPORT_SYMBOL(ip6_output);
 
 /*
  *	xmit an sk_buff (used by TCP)
@@ -405,6 +406,9 @@ int ip6_forward(struct sk_buff *skb)
 		goto drop;
 	}
 
+	if (skb->pkt_type != PACKET_HOST)
+		goto drop;
+
 	skb_forward_csum(skb);
 
 	/*
@@ -513,6 +517,20 @@ int ip6_forward(struct sk_buff *skb)
 		return -EMSGSIZE;
 	}
 
+	/*
+	 * We try to optimize forwarding of VE packets:
+	 * do not decrement TTL (and so save skb_cow)
+	 * during forwarding of outgoing pkts from VE.
+	 * For incoming pkts we still do ttl decr,
+	 * since such skb is not cloned and does not require
+	 * actual cow. So, there is at least one place
+	 * in pkts path with mandatory ttl decr, that is
+	 * sufficient to prevent routing loops.
+	 */
+	hdr = ipv6_hdr(skb);
+	if (skb->dev->vz_features & NETIF_F_VENET) /* src is VENET device */
+		goto no_ttl_decr;
+
 	if (skb_cow(skb, dst->dev->hard_header_len)) {
 		IP6_INC_STATS(net, ip6_dst_idev(dst), IPSTATS_MIB_OUTDISCARDS);
 		goto drop;
@@ -524,6 +542,7 @@ int ip6_forward(struct sk_buff *skb)
 
 	hdr->hop_limit--;
 
+no_ttl_decr:
 	IP6_INC_STATS_BH(net, ip6_dst_idev(dst), IPSTATS_MIB_OUTFORWDATAGRAMS);
 	return NF_HOOK(PF_INET6, NF_INET_FORWARD, skb, skb->dev, dst->dev,
 		       ip6_forward_finish);
@@ -564,6 +583,7 @@ int ip6_fragment(struct sk_buff *skb, int (*output)(struct sk_buff *))
 	struct ipv6hdr *tmp_hdr;
 	struct frag_hdr *fh;
 	unsigned int mtu, hlen, left, len;
+	int hroom;
 	__be32 frag_id = 0;
 	int ptr, offset = 0, err=0;
 	u8 *prevhdr, nexthdr = 0;
@@ -598,20 +618,22 @@ int ip6_fragment(struct sk_buff *skb, int (*output)(struct sk_buff *))
 	}
 	mtu -= hlen + sizeof(struct frag_hdr);
 
+	hroom = LL_RESERVED_SPACE(rt->u.dst.dev);
 	if (skb_has_frag_list(skb)) {
 		int first_len = skb_pagelen(skb);
 		int truesizes = 0;
 
 		if (first_len - hlen > mtu ||
 		    ((first_len - hlen) & 7) ||
-		    skb_cloned(skb))
+		    skb_cloned(skb) ||
+		    skb_headroom(skb) < (hroom + sizeof(struct frag_hdr)))
 			goto slow_path;
 
 		skb_walk_frags(skb, frag) {
 			/* Correct geometry. */
 			if (frag->len > mtu ||
 			    ((frag->len & 7) && frag->next) ||
-			    skb_headroom(frag) < hlen)
+			    skb_headroom(frag) < (hlen + hroom + sizeof(struct frag_hdr)))
 			    goto slow_path;
 
 			/* Partially cloned skb? */
@@ -628,8 +650,6 @@ int ip6_fragment(struct sk_buff *skb, int (*output)(struct sk_buff *))
 
 		err = 0;
 		offset = 0;
-		frag = skb_shinfo(skb)->frag_list;
-		skb_frag_list_init(skb);
 		/* BUILD HEADER */
 
 		*prevhdr = NEXTHDR_FRAGMENT;
@@ -637,8 +657,11 @@ int ip6_fragment(struct sk_buff *skb, int (*output)(struct sk_buff *))
 		if (!tmp_hdr) {
 			IP6_INC_STATS(net, ip6_dst_idev(skb_dst(skb)),
 				      IPSTATS_MIB_FRAGFAILS);
-			return -ENOMEM;
+			err = -ENOMEM;
+			goto fail;
 		}
+		frag = skb_shinfo(skb)->frag_list;
+		skb_frag_list_init(skb);
 
 		__skb_pull(skb, hlen);
 		fh = (struct frag_hdr*)__skb_push(skb, sizeof(struct frag_hdr));

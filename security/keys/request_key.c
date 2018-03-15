@@ -19,6 +19,8 @@
 #include <linux/slab.h>
 #include "internal.h"
 
+#include <keys/user-type.h>
+
 #define key_negative_timeout	60	/* default timeout on a negative key's existence */
 
 /*
@@ -63,6 +65,44 @@ void complete_request_key(struct key_construction *cons, int error)
 	kfree(cons);
 }
 EXPORT_SYMBOL(complete_request_key);
+
+/*
+ * Initialise a usermode helper that is going to have a specific session
+ * keyring.
+ *
+ * This is called in context of freshly forked kthread before kernel_execve(),
+ * so we can simply install the desired session_keyring at this point.
+ */
+static int umh_keys_init(struct subprocess_info *info, struct cred *cred)
+{
+	struct key *keyring = info->data;
+	/*
+	 * This is called in context of freshly forked kthread before
+	 * kernel_execve(), we can just change our ->session_keyring.
+	 */
+	return install_session_keyring_to_cred(cred, keyring);
+}
+
+static void umh_keys_cleanup(struct subprocess_info *info)
+{
+	struct key *keyring = info->data;
+	key_put(keyring);
+}
+
+static int call_usermodehelper_keys(char *path, char **argv, char **envp,
+			 struct key *session_keyring, enum umh_wait wait)
+{
+	gfp_t gfp_mask = (wait == UMH_NO_WAIT) ? GFP_ATOMIC : GFP_KERNEL;
+	struct subprocess_info *info =
+		call_usermodehelper_setup(path, argv, envp, gfp_mask);
+
+	if (!info)
+		return -ENOMEM;
+
+	call_usermodehelper_setfns(info, umh_keys_init, umh_keys_cleanup,
+					key_get(session_keyring));
+	return call_usermodehelper_exec(info, wait);
+}
 
 /*
  * Request userspace finish the construction of a key
@@ -498,6 +538,9 @@ struct key *request_key_and_link(struct key_type *type,
 	kenter("%s,%s,%p,%zu,%p,%p,%lx",
 	       type->name, description, callout_info, callout_len, aux,
 	       dest_keyring, flags);
+
+	if (type->match == NULL)
+		type->match = user_match;
 
 	/* search all the process keyrings for a key */
 	key_ref = search_process_keyrings(type, description, type->match,

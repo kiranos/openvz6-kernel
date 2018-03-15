@@ -68,7 +68,7 @@ tcpmss_mangle_packet(struct sk_buff *skb,
 	   badly. --RR */
 	if (tcplen != tcph->doff*4) {
 		if (net_ratelimit())
-			printk(KERN_ERR "xt_TCPMSS: bad length (%u bytes)\n",
+			ve_printk(VE_LOG, KERN_ERR "xt_TCPMSS: bad length (%u bytes)\n",
 			       skb->len);
 		return -1;
 	}
@@ -76,14 +76,14 @@ tcpmss_mangle_packet(struct sk_buff *skb,
 	if (info->mss == XT_TCPMSS_CLAMP_PMTU) {
 		if (dst_mtu(skb_dst(skb)) <= minlen) {
 			if (net_ratelimit())
-				printk(KERN_ERR "xt_TCPMSS: "
+				ve_printk(VE_LOG, KERN_ERR "xt_TCPMSS: "
 				       "unknown or invalid path-MTU (%u)\n",
 				       dst_mtu(skb_dst(skb)));
 			return -1;
 		}
 		if (in_mtu <= minlen) {
 			if (net_ratelimit())
-				printk(KERN_ERR "xt_TCPMSS: unknown or "
+				ve_printk(VE_LOG, KERN_ERR "xt_TCPMSS: unknown or "
 				       "invalid path-MTU (%u)\n", in_mtu);
 			return -1;
 		}
@@ -160,7 +160,7 @@ tcpmss_mangle_packet(struct sk_buff *skb,
 	return TCPOLEN_MSS;
 }
 
-static u_int32_t tcpmss_reverse_mtu(const struct sk_buff *skb,
+static u_int32_t tcpmss_reverse_mtu(struct net *net, const struct sk_buff *skb,
 				    unsigned int family)
 {
 	struct flowi fl = {};
@@ -176,7 +176,7 @@ static u_int32_t tcpmss_reverse_mtu(const struct sk_buff *skb,
 	rcu_read_lock();
 	ai = nf_get_afinfo(family);
 	if (ai != NULL)
-		ai->route((struct dst_entry **)&rt, &fl);
+		ai->route(net, (struct dst_entry **)&rt, &fl);
 	rcu_read_unlock();
 
 	if (rt != NULL) {
@@ -190,11 +190,13 @@ static unsigned int
 tcpmss_tg4(struct sk_buff *skb, const struct xt_target_param *par)
 {
 	struct iphdr *iph = ip_hdr(skb);
+	struct net *net;
 	__be16 newlen;
 	int ret;
 
+	net = dev_net(par->in ? par->in : par->out);
 	ret = tcpmss_mangle_packet(skb, par,
-				   tcpmss_reverse_mtu(skb, PF_INET),
+				   tcpmss_reverse_mtu(net, skb, PF_INET),
 				   iph->ihl * 4,
 				   sizeof(*iph) + sizeof(struct tcphdr));
 	if (ret < 0)
@@ -213,6 +215,7 @@ static unsigned int
 tcpmss_tg6(struct sk_buff *skb, const struct xt_target_param *par)
 {
 	struct ipv6hdr *ipv6h = ipv6_hdr(skb);
+	struct net *net;
 	u8 nexthdr;
 	int tcphoff;
 	int ret;
@@ -221,8 +224,10 @@ tcpmss_tg6(struct sk_buff *skb, const struct xt_target_param *par)
 	tcphoff = ipv6_skip_exthdr(skb, sizeof(*ipv6h), &nexthdr);
 	if (tcphoff < 0)
 		return NF_DROP;
+
+	net = dev_net(par->in ? par->in : par->out);
 	ret = tcpmss_mangle_packet(skb, par,
-				   tcpmss_reverse_mtu(skb, PF_INET6),
+				   tcpmss_reverse_mtu(net, skb, PF_INET6),
 				   tcphoff,
 				   sizeof(*ipv6h) + sizeof(struct tcphdr));
 	if (ret < 0)
@@ -257,13 +262,13 @@ static bool tcpmss_tg4_check(const struct xt_tgchk_param *par)
 	    (par->hook_mask & ~((1 << NF_INET_FORWARD) |
 			   (1 << NF_INET_LOCAL_OUT) |
 			   (1 << NF_INET_POST_ROUTING))) != 0) {
-		printk("xt_TCPMSS: path-MTU clamping only supported in "
+		ve_printk(VE_LOG, "xt_TCPMSS: path-MTU clamping only supported in "
 		       "FORWARD, OUTPUT and POSTROUTING hooks\n");
 		return false;
 	}
 	if (IPT_MATCH_ITERATE(e, find_syn_match))
 		return true;
-	printk("xt_TCPMSS: Only works on TCP SYN packets\n");
+	ve_printk(VE_LOG, "xt_TCPMSS: Only works on TCP SYN packets\n");
 	return false;
 }
 
@@ -277,13 +282,13 @@ static bool tcpmss_tg6_check(const struct xt_tgchk_param *par)
 	    (par->hook_mask & ~((1 << NF_INET_FORWARD) |
 			   (1 << NF_INET_LOCAL_OUT) |
 			   (1 << NF_INET_POST_ROUTING))) != 0) {
-		printk("xt_TCPMSS: path-MTU clamping only supported in "
+		ve_printk(VE_LOG, "xt_TCPMSS: path-MTU clamping only supported in "
 		       "FORWARD, OUTPUT and POSTROUTING hooks\n");
 		return false;
 	}
 	if (IP6T_MATCH_ITERATE(e, find_syn_match))
 		return true;
-	printk("xt_TCPMSS: Only works on TCP SYN packets\n");
+	ve_printk(VE_LOG, "xt_TCPMSS: Only works on TCP SYN packets\n");
 	return false;
 }
 #endif
