@@ -1024,6 +1024,7 @@ unsigned find_get_pages_tag(struct address_space *mapping, pgoff_t *index,
 			int tag, unsigned int nr_pages, struct page **pages)
 {
 	unsigned int i;
+	unsigned int relaxleft = 512;
 	unsigned int ret;
 	unsigned int nr_found;
 
@@ -1073,9 +1074,16 @@ repeat:
 	 * try again, because callers stop trying once 0 is returned.
 	 */
 	if (unlikely(!ret && nr_found)) {
-		cpu_relax();
-		goto restart;
+		if (relaxleft > 0) {
+			relaxleft--;
+			cpu_relax();
+			goto restart;
+		} else {
+			WARN_ON(1);
+			goto out;
+		}
 	}
+out:
 	rcu_read_unlock();
 
 	if (ret)
