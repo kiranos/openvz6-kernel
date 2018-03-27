@@ -55,7 +55,7 @@ define print_msg
 endef
 
 define make
-  @$(MAKE) -f Makefile.perf --no-print-directory -j$(JOBS) O=$(FULL_O) $(SET_DEBUG) $@
+  @$(MAKE) -f Makefile.perf --no-print-directory -j$(JOBS) EXTRA_CFLAGS=$(EXTRA_CFLAGS) KCFLAGS=$(KCFLAGS) O=$(FULL_O) $(SET_DEBUG) $@
 endef
 
 #
@@ -78,7 +78,7 @@ clean:
 # The build-test target is not really parallel, don't print the jobs info:
 #
 build-test:
-	@$(MAKE) -f tests/make --no-print-directory
+	#@$(MAKE) -f tests/make --no-print-directory
 
 #
 # All other targets get passed through:

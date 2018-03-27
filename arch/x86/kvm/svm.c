@@ -3198,13 +3198,13 @@ static void svm_vcpu_run(struct kvm_vcpu *vcpu)
 	spec_ctrl_vmenter_ibrs(svm->spec_ctrl);
 
 	asm volatile (
-		"push %%"R"bp; \n\t"
-		"mov %c[rbx](%[svm]), %%"R"bx \n\t"
-		"mov %c[rcx](%[svm]), %%"R"cx \n\t"
-		"mov %c[rdx](%[svm]), %%"R"dx \n\t"
-		"mov %c[rsi](%[svm]), %%"R"si \n\t"
-		"mov %c[rdi](%[svm]), %%"R"di \n\t"
-		"mov %c[rbp](%[svm]), %%"R"bp \n\t"
+		"push %%"R "bp; \n\t"
+		"mov %c[rbx](%[svm]), %%"R "bx \n\t"
+		"mov %c[rcx](%[svm]), %%"R "cx \n\t"
+		"mov %c[rdx](%[svm]), %%"R "dx \n\t"
+		"mov %c[rsi](%[svm]), %%"R "si \n\t"
+		"mov %c[rdi](%[svm]), %%"R "di \n\t"
+		"mov %c[rbp](%[svm]), %%"R "bp \n\t"
 #ifdef CONFIG_X86_64
 		"mov %c[r8](%[svm]),  %%r8  \n\t"
 		"mov %c[r9](%[svm]),  %%r9  \n\t"
@@ -3217,20 +3217,20 @@ static void svm_vcpu_run(struct kvm_vcpu *vcpu)
 #endif
 
 		/* Enter guest mode */
-		"push %%"R"ax \n\t"
-		"mov %c[vmcb](%[svm]), %%"R"ax \n\t"
+		"push %%"R "ax \n\t"
+		"mov %c[vmcb](%[svm]), %%"R "ax \n\t"
 		__ex(SVM_VMLOAD) "\n\t"
 		__ex(SVM_VMRUN) "\n\t"
 		__ex(SVM_VMSAVE) "\n\t"
-		"pop %%"R"ax \n\t"
+		"pop %%"R "ax \n\t"
 
 		/* Save guest registers, load host registers */
-		"mov %%"R"bx, %c[rbx](%[svm]) \n\t"
-		"mov %%"R"cx, %c[rcx](%[svm]) \n\t"
-		"mov %%"R"dx, %c[rdx](%[svm]) \n\t"
-		"mov %%"R"si, %c[rsi](%[svm]) \n\t"
-		"mov %%"R"di, %c[rdi](%[svm]) \n\t"
-		"mov %%"R"bp, %c[rbp](%[svm]) \n\t"
+		"mov %%"R "bx, %c[rbx](%[svm]) \n\t"
+		"mov %%"R "cx, %c[rcx](%[svm]) \n\t"
+		"mov %%"R "dx, %c[rdx](%[svm]) \n\t"
+		"mov %%"R "si, %c[rsi](%[svm]) \n\t"
+		"mov %%"R "di, %c[rdi](%[svm]) \n\t"
+		"mov %%"R "bp, %c[rbp](%[svm]) \n\t"
 #ifdef CONFIG_X86_64
 		"mov %%r8,  %c[r8](%[svm]) \n\t"
 		"mov %%r9,  %c[r9](%[svm]) \n\t"
@@ -3260,7 +3260,7 @@ static void svm_vcpu_run(struct kvm_vcpu *vcpu)
 		"xor %%r14, %%r14 \n\t"
 		"xor %%r15, %%r15 \n\t"
 #endif
-		"pop %%"R"bp"
+		"pop %%"R "bp"
 		:
 		: [svm]"a"(svm),
 		  [vmcb]"i"(offsetof(struct vcpu_svm, vmcb_pa)),
@@ -3281,7 +3281,7 @@ static void svm_vcpu_run(struct kvm_vcpu *vcpu)
 		  [r15]"i"(offsetof(struct vcpu_svm, vcpu.arch.regs[VCPU_REGS_R15]))
 #endif
 		: "cc", "memory"
-		, R"bx", R"cx", R"dx", R"si", R"di"
+		, R "bx", R "cx", R "dx", R "si", R "di"
 #ifdef CONFIG_X86_64
 		, "r8", "r9", "r10", "r11" , "r12", "r13", "r14", "r15"
 #endif
