@@ -51,6 +51,8 @@ tcpmss_mangle_packet(struct sk_buff *skb,
 	const struct xt_tcpmss_info *info = par->targinfo;
 	struct tcphdr *tcph;
 	unsigned int tcplen, i;
+	unsigned int tcp_hdrlen;
+
 	__be16 oldval;
 	u16 newmss;
 	u8 *opt;
@@ -60,16 +62,24 @@ tcpmss_mangle_packet(struct sk_buff *skb,
 
 	tcplen = skb->len - tcphoff;
 	tcph = (struct tcphdr *)(skb_network_header(skb) + tcphoff);
+	tcp_hdrlen = tcph->doff * 4;
 
 	/* Since it passed flags test in tcp match, we know it is is
 	   not a fragment, and has data >= tcp header length.  SYN
 	   packets should not contain data: if they did, then we risk
 	   running over MTU, sending Frag Needed and breaking things
 	   badly. --RR */
-	if (tcplen != tcph->doff*4) {
+	if (tcplen != tcp_hdrlen) {
 		if (net_ratelimit())
 			ve_printk(VE_LOG, KERN_ERR "xt_TCPMSS: bad length (%u bytes)\n",
 			       skb->len);
+		return -1;
+	}
+
+	if (tcp_hdrlen < sizeof(struct tcphdr)) {
+		if (net_ratelimit())
+		  ve_printk(VE_LOG, KERN_ERR "xt_TCPMSS: invalid value of doff in the TCP header (%u)\n",
+			tcph->doff);
 		return -1;
 	}
 
@@ -92,8 +102,8 @@ tcpmss_mangle_packet(struct sk_buff *skb,
 		newmss = info->mss;
 
 	opt = (u_int8_t *)tcph;
-	for (i = sizeof(struct tcphdr); i < tcph->doff*4; i += optlen(opt, i)) {
-		if (opt[i] == TCPOPT_MSS && tcph->doff*4 - i >= TCPOLEN_MSS &&
+	for (i = sizeof(struct tcphdr); i < tcp_hdrlen; i += optlen(opt, i)) {
+		if (opt[i] == TCPOPT_MSS && tcp_hdrlen - i >= TCPOLEN_MSS &&
 		    opt[i+1] == TCPOLEN_MSS) {
 			u_int16_t oldmss;
 
@@ -115,6 +125,10 @@ tcpmss_mangle_packet(struct sk_buff *skb,
 			return 0;
 		}
 	}
+
+	/* tcph->doff has 4 bits, do not wrap it to 0 */
+	if (tcp_hdrlen >= 15 * 4)
+		return 0;
 
 	/*
 	 * MSS Option not found ?! add it..
