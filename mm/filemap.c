@@ -866,11 +866,13 @@ unsigned find_get_pages(struct address_space *mapping, pgoff_t start,
 			    unsigned int nr_pages, struct page **pages)
 {
 	unsigned int i;
+	unsigned int relaxleft = 512;
 	unsigned int ret;
 	unsigned int nr_found;
 
 	rcu_read_lock();
 restart:
+	restarts++;
 	nr_found = radix_tree_gang_lookup_slot(&mapping->page_tree,
 				(void ***)pages, NULL, start, nr_pages);
 	ret = 0;
@@ -917,9 +919,16 @@ repeat:
 	 * try again, because callers stop trying once 0 is returned.
 	 */
 	if (unlikely(!ret && nr_found)) {
-		cpu_relax();
-		goto restart;
+		if (relaxleft > 0) {
+			relaxleft--;
+			cpu_relax();
+			goto restart;
+		} else {
+			WARN_ON(1);
+			goto out;
+		}
 	}
+out:
 	rcu_read_unlock();
 	return ret;
 }
